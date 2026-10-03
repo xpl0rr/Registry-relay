@@ -1,0 +1,34 @@
+name: Registry pull
+on:
+  schedule:
+    - cron: "17 6 * * 0"   # every Sunday 06:17 UTC, before the Fiji Sunday scan
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch trial records from ClinicalTrials.gov
+        run: |
+          set -e
+          IDS="NCT06830642 NCT07140874 NCT06937931 NCT07304089 NCT07290244 NCT06944522 NCT05166889 NCT05158387 NCT06040086 NCT05742802 NCT03178149 NCT07770828"
+          FIELDS="NCTId,BriefTitle,OverallStatus,WhyStopped,EnrollmentCount,LastUpdatePostDate,StatusVerifiedDate"
+          echo "{\"fetched_utc\":\"$(date -u +%FT%TZ)\",\"studies\":[" > registry.json
+          first=1
+          for id in $IDS; do
+            body=$(curl -sf "https://clinicaltrials.gov/api/v2/studies/$id?format=json&fields=$FIELDS" || echo "{\"error\":\"fetch failed\",\"id\":\"$id\"}")
+            [ $first -eq 1 ] && first=0 || echo "," >> registry.json
+            echo "$body" >> registry.json
+            sleep 1
+          done
+          echo "]}" >> registry.json
+          python3 -m json.tool registry.json > /dev/null
+      - name: Commit if changed
+        run: |
+          git config user.name "registry-bot"
+          git config user.email "registry-bot@users.noreply.github.com"
+          git add registry.json
+          git diff --cached --quiet || git commit -m "Registry pull $(date -u +%F)"
+          git push
